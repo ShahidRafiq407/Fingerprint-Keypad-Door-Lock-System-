@@ -1,0 +1,145 @@
+Fixed code
+
+#include <Adafruit_Fingerprint.h>
+#include <SoftwareSerial.h>
+#include <Keypad.h>
+#include <Wire.h> 
+#include <LiquidCrystal_I2C.h>
+
+// --- FINGERPRINT WIRING ---
+// Green -> Pin 3, White -> Pin 2
+SoftwareSerial fingerSerial(2, 3);
+Adafruit_Fingerprint finger = Adafruit_Fingerprint(&fingerSerial);
+
+// --- LCD SETUP ---
+LiquidCrystal_I2C lcd(0x27, 16, 2); 
+
+// --- KEYPAD SETUP ---
+const byte ROWS = 4; 
+const byte COLS = 4; 
+char hexaKeys[ROWS][COLS] = {
+  {'1', '2', '3', 'A'},
+  {'4', '5', '6', 'B'},
+  {'7', '8', '9', 'C'},
+  {'*', '0', '#', 'D'}
+};
+byte rowPins[ROWS] = {11, 10, 9, 8}; 
+byte colPins[COLS] = {7, 6, 5, 4}; 
+Keypad customKeypad = Keypad(makeKeymap(hexaKeys), rowPins, colPins, ROWS, COLS);
+
+// --- LOCK SETUP ---
+const byte lockPin = A0; 
+String inputPassword = "";
+String masterPassword = "1234";
+bool isLocked = true; 
+
+void setup() {
+  Serial.begin(9600);
+  
+  // --- RELAY LOGIC (Active Low) ---
+  digitalWrite(lockPin, HIGH); // Start as LOCKED (High)
+  pinMode(lockPin, OUTPUT);
+  
+  // LCD Start
+  lcd.init();
+  lcd.backlight();
+  lcd.setCursor(0, 0);
+  lcd.print(F("System Starting"));
+
+  // Fingerprint Start
+  finger.begin(57600);
+  
+  if (finger.verifyPassword()) {
+    lcd.setCursor(0, 1);
+    lcd.print(F("Sensor: OK"));
+  } else {
+    lcd.setCursor(0, 1);
+    lcd.print(F("Check Wires 3&2"));
+    delay(3000); 
+  }
+
+  delay(1000);
+  resetScreen();
+}
+
+void loop() {
+  // 1. Check Keypad
+  checkKeypad();
+
+  // 2. Check Fingerprint
+  int fingerID = getFingerprintID();
+  
+  if (fingerID != -1) {
+    if (isLocked) {
+      lcd.clear();
+      lcd.print(F("Finger Match!"));
+      lcd.setCursor(0, 1);
+      lcd.print(F("ID: ")); lcd.print(fingerID);
+      delay(200); 
+      unlockDoor();
+    } else {
+      lcd.clear(); lcd.print(F("Already Open"));
+      delay(1000); resetScreen();
+    }
+  }
+}
+
+// --- KEYPAD LOGIC ---
+void checkKeypad() {
+  char key = customKeypad.getKey();
+  if (key) {
+    if (key == '#') {
+      if (inputPassword == masterPassword) {
+        if (isLocked) {
+          lcd.clear(); lcd.print(F("Pass Correct!"));
+          unlockDoor();
+        } else {
+          lcd.clear(); lcd.print(F("Already Open"));
+          delay(1000); resetScreen();
+        }
+      } else {
+        lcd.clear(); lcd.print(F("Wrong Pass!"));
+        delay(2000); resetScreen();
+      }
+      inputPassword = "";
+    } else if (key == '*') {
+      inputPassword = "";
+      resetScreen();
+    } else {
+      inputPassword += key;
+      lcd.setCursor(0, 1);
+      String stars = "";
+      for(int i=0; i<inputPassword.length(); i++) stars += "*";
+      lcd.print(stars);
+    }
+  }
+}
+
+// --- FINGERPRINT LOGIC ---
+int getFingerprintID() {
+  uint8_t p = finger.getImage();
+  if (p != FINGERPRINT_OK) return -1;
+  p = finger.image2Tz();
+  if (p != FINGERPRINT_OK) return -1;
+  p = finger.fingerFastSearch();
+  if (p != FINGERPRINT_OK) return -1;
+  return finger.fingerID;
+}
+
+// --- UNLOCK FUNCTION ---
+void unlockDoor() {
+  isLocked = false; 
+  
+  // Active Low Logic:
+  digitalWrite(lockPin, LOW); // LOW = Unlock
+  delay(3000); 
+  digitalWrite(lockPin, HIGH); // HIGH = Lock
+  
+  isLocked = true; 
+  resetScreen();
+}
+
+void resetScreen() {
+  lcd.clear();
+  lcd.print(F("Enter Pass/Finger"));
+}
